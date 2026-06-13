@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,7 +6,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
 # ------------------- Data Preparation -------------------
-df = pd.read_csv("Placement_Data_Full_Class.csv")
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+df = pd.read_csv(os.path.join(_BASE_DIR, "Placement_Data_Full_Class.csv"))
 df.drop("sl_no", axis=1, inplace=True)
 
 # Encode categorical features
