@@ -383,21 +383,93 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ----------------- Load Trained Models -----------------
+# ----------------- Load Trained Models & Auto-Train Helper -----------------
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 model_path = os.path.join(_BASE_DIR, 'placement_models.pkl')
 
+def train_and_save_models():
+    from sklearn.preprocessing import LabelEncoder
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+    
+    csv_path = os.path.join(_BASE_DIR, "Placement_Data_Expanded.csv")
+    if not os.path.exists(csv_path):
+        return None
+        
+    df = pd.read_csv(csv_path)
+    
+    encoders = {}
+    categorical_cols = ['gender', 'degree', 'stream', 'workex']
+    df_encoded = df.copy()
+    
+    for col in categorical_cols:
+        le = LabelEncoder()
+        df_encoded[col] = le.fit_transform(df[col])
+        encoders[col] = le
+        
+    encoder_classes = {col: list(le.classes_) for col, le in encoders.items()}
+    
+    feature_cols = [
+        'gender', 'degree', 'stream', 'ssc_p', 'hsc_p', 'cgpa', 'workex',
+        'coding_skills', 'communication_skills', 'analytical_skills', 'domain_knowledge',
+        'projects', 'internships', 'certifications'
+    ]
+    
+    # Train placement status model
+    X_status = df_encoded[feature_cols]
+    y_status = df_encoded['placed_status'].apply(lambda x: 1 if x == 'Placed' else 0)
+    status_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    status_model.fit(X_status, y_status)
+    
+    # Train placed sector model (only Placed students)
+    df_placed = df_encoded[df_encoded['placed_status'] == 'Placed'].copy()
+    sector_encoder = LabelEncoder()
+    df_placed['placed_sector_encoded'] = sector_encoder.fit_transform(df_placed['placed_sector'])
+    encoders['placed_sector'] = sector_encoder
+    
+    X_sector = df_placed[feature_cols]
+    y_sector = df_placed['placed_sector_encoded']
+    sector_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    sector_model.fit(X_sector, y_sector)
+    
+    # Train salary regressor model (only Placed students)
+    X_salary = df_placed[feature_cols]
+    y_salary = df_placed['salary_lpa']
+    salary_model = RandomForestRegressor(n_estimators=100, random_state=42)
+    salary_model.fit(X_salary, y_salary)
+    
+    models_dict = {
+        'status_model': status_model,
+        'sector_model': sector_model,
+        'salary_model': salary_model,
+        'encoders': encoders,
+        'feature_cols': feature_cols,
+        'encoder_classes': encoder_classes
+    }
+    
+    # Attempt to cache the trained models locally for future fast loads
+    try:
+        with open(model_path, 'wb') as f:
+            pickle.dump(models_dict, f)
+    except Exception:
+        # If running in a read-only container environment, bypass writing to disk
+        pass
+        
+    return models_dict
+
 @st.cache_resource
 def load_models():
-    if not os.path.exists(model_path):
-        return None
-    with open(model_path, 'rb') as f:
-        return pickle.load(f)
+    if os.path.exists(model_path):
+        with open(model_path, 'rb') as f:
+            return pickle.load(f)
+            
+    # Auto-train if dataset is available
+    with st.spinner("⏳ First run: Training predictive models on the fly..."):
+        return train_and_save_models()
 
 models_dict = load_models()
 
 if models_dict is None:
-    st.error("⚠️ Model file not found! Please run `python campus_placement.py` first to train the models.")
+    st.error("⚠️ Dataset file (`Placement_Data_Expanded.csv`) not found! Please ensure it is present in the repository.")
     st.stop()
 
 status_model = models_dict['status_model']
